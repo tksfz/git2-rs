@@ -54,12 +54,15 @@ fn main() {
     // jankily) here...
     if mingw {
         cflags.push_str(" -DGIT_SSH");
-        let libssh2_root = env::var("DEP_SSH2_ROOT").unwrap();
-        cflags.push_str(&format!(" -I{}/include", libssh2_root));
     } else if msvc {
         cflags.push_str(" /DGIT_SSH");
-        let libssh2_root = env::var("DEP_SSH2_ROOT").unwrap();
-        cflags.push_str(&format!(" /I{}\\include", libssh2_root));
+    }
+    if let Ok(libssh2_include) = env::var("DEP_SSH2_INCLUDE") {
+        if mingw {
+            cflags.push_str(&format!(" -I{}", libssh2_include));
+        } else if msvc {
+            cflags.push_str(&format!(" /I{}", libssh2_include));
+        }
     }
 
     let src = PathBuf::from(&env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -81,6 +84,7 @@ fn main() {
     }
     let profile = match &env::var("PROFILE").unwrap()[..] {
         "bench" | "release" => "Release",
+        _ if msvc => "Release", // currently we need to always use the same CRT
         _ => "Debug",
     };
     run(cmd.arg("-DBUILD_SHARED_LIBS=OFF")
@@ -104,12 +108,16 @@ fn main() {
     run(Command::new("cmake")
                 .arg("--build").arg(".")
                 .arg("--target").arg("install")
+                .arg("--config").arg(profile)
                 .current_dir(&dst.join("build")), "cmake");
 
     println!("cargo:root={}", dst.display());
-    if mingw || target.contains("windows") {
-        println!("cargo:rustc-flags=-l winhttp -l rpcrt4 -l ole32 \
-                                    -l static=git2");
+    if target.contains("windows") {
+        println!("cargo:rustc-link-lib=winhttp");
+        println!("cargo:rustc-link-lib=rpcrt4");
+        println!("cargo:rustc-link-lib=ole32");
+        println!("cargo:rustc-link-lib=crypt32");
+        println!("cargo:rustc-link-lib=static=git2");
         println!("cargo:rustc-link-search=native={}/lib", dst.display());
         return
     }
@@ -121,10 +129,10 @@ fn main() {
         }
     }
 
-    println!("cargo:rustc-flags=-l static=git2");
-    println!("cargo:rustc-flags=-L {}", dst.join("lib").display());
+    println!("cargo:rustc-link-lib=static=git2");
+    println!("cargo:rustc-link-search=native={}", dst.join("lib").display());
     if target.contains("apple") {
-        println!("cargo:rustc-flags=-l iconv");
+        println!("cargo:rustc-link-lib=iconv");
     }
 }
 
